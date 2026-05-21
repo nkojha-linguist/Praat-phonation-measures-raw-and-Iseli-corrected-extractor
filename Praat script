@@ -1,0 +1,173 @@
+################################################################
+# Comprehensive Phonation Script: Raw and Corrected (c) Measures
+################################################################
+
+form Calculate Raw and Corrected Phonation Measures
+   text sound_directory D:\tmp\
+   sentence Sound_file_extension .wav
+   text textGrid_directory D:\tmp\
+   sentence TextGrid_file_extension .TextGrid
+   text resultfile D:\tmp\comprehensive_phonation.csv
+   integer the_tier 1
+   integer chunk 3
+   choice sex 1
+   button male
+   button female
+   positive length 0.005
+   positive left_F1_reference 500
+   positive right_F1_reference 550
+   positive left_F2_reference 1485
+   positive right_F2_reference 1650
+   positive left_F3_reference 2475
+   positive right_F3_reference 2750
+endform
+
+Create Strings as file list... list 'sound_directory$'*'sound_file_extension$'
+numberOfFiles = Get number of strings
+
+if fileReadable (resultfile$)
+	filedelete 'resultfile$'
+endif
+
+# --- STEP 1: HEADER ---
+header$ = "Filename,Label,T2,T3,Start,End,Dur"
+for k from 1 to chunk
+	header$ = header$ + ",H1H2_p'k',H2H4_p'k',H1A1_p'k',H1A2_p'k',H1A3_p'k',H1cH2c_p'k',H2cH4c_p'k',H1cA1_p'k',H1cA2_p'k',H1cA3_p'k'"
+endfor
+writeFileLine: "'resultfile$'", header$
+
+# --- STEP 2: PROCESS ---
+for ifile to numberOfFiles
+	name$ = Get string... ifile
+	Read from file... 'sound_directory$''name$'
+	soundname$ = selected$ ("Sound", 1)
+	sound = selected("Sound")
+
+	if 'sex' = 1
+		maxf = 5000
+	else
+		maxf = 5500
+	endif
+
+	select 'sound'
+	Resample... 16000 50
+	sound_16khz = selected("Sound")
+	To Formant (burg)... 0.01 5 'maxf' 0.025 50
+	formant_obj = selected("Formant")
+
+	select 'sound'
+	To Pitch... 0 60 350
+	pitch_obj = selected("Pitch")
+	Interpolate
+	pitch_interp = selected("Pitch")
+
+	gridfile$ = "'textGrid_directory$''soundname$''textGrid_file_extension$'"
+	if fileReadable (gridfile$)
+		Read from file... 'gridfile$'
+		textgrid = selected("TextGrid")
+		nlabels = Get number of intervals... the_tier
+		for label from 1 to nlabels
+			select 'textgrid'
+			labelx$ = Get label of interval... the_tier label
+			if labelx$ <> ""
+				n_b = Get start point... the_tier label
+				n_e = Get end point... the_tier label
+				n_d = n_e - n_b
+				midpoint = n_b + (n_d / 2)
+				
+				t2_idx = Get interval at time... 2 midpoint
+				t2$ = Get label of interval... 2 t2_idx
+				t3_idx = Get interval at time... 3 midpoint
+				t3$ = Get label of interval... 3 t3_idx
+
+				# FIXED: Changed appendFileLine to appendFile to prevent early newline
+				appendFile: "'resultfile$'", 
+				... """'soundname$'""", ",",
+				... """'labelx$'""", ",",
+				... """'t2$'""", ",",
+				... """'t3$'""", ",",
+				... n_b, ",", 
+				... n_e, ",", 
+				... n_d
+
+				for kounter from 1 to chunk
+					n_seg = n_d / chunk
+					n_md = n_b + ((kounter - 1) * n_seg) + (n_seg / 2)
+
+					select 'formant_obj'
+					f1 = Get value at time... 1 n_md Hertz Linear
+					f2 = Get value at time... 2 n_md Hertz Linear
+					f3 = Get value at time... 3 n_md Hertz Linear
+					b1 = Get bandwidth at time... 1 n_md Hertz Linear
+					b2 = Get bandwidth at time... 2 n_md Hertz Linear
+
+					select 'pitch_interp'
+					f0 = Get value at time... n_md Hertz Linear
+
+					if f0 <> undefined and f1 <> undefined and f1 <> 0
+						select 'sound_16khz'
+						Extract part... (n_md-0.01) (n_md+0.01) Hanning 1 no
+						To Spectrum (fft)
+						To Ltas (1-to-1)
+						ltas = selected("Ltas")
+
+						h1 = Get maximum... (f0*0.9) (f0*1.1) None
+						h2 = Get maximum... (f0*1.9) (f0*2.1) None
+						h4 = Get maximum... (f0*3.9) (f0*4.1) None
+						a1 = Get maximum... (f1*0.9) (f1*1.1) None
+						a2 = Get maximum... (f2*0.9) (f2*1.1) None
+						a3 = Get maximum... (f3*0.9) (f3*1.1) None
+
+						# Correction logic (Iseli et al. 2007)
+						c1_h1 = 20 * log10(f1^2 / sqrt((f1^2 - f0^2)^2 + (f0 * b1)^2))
+						c2_h1 = 20 * log10(f2^2 / sqrt((f2^2 - f0^2)^2 + (f0 * b2)^2))
+						h1c = h1 - c1_h1 - c2_h1
+
+						c1_h2 = 20 * log10(f1^2 / sqrt((f1^2 - (f0*2)^2)^2 + ((f0*2) * b1)^2))
+						c2_h2 = 20 * log10(f2^2 / sqrt((f2^2 - (f0*2)^2)^2 + ((f0*2) * b2)^2))
+						h2c = h2 - c1_h2 - c2_h2
+
+						c1_h4 = 20 * log10(f1^2 / sqrt((f1^2 - (f0*4)^2)^2 + ((f0*4) * b1)^2))
+						c2_h4 = 20 * log10(f2^2 / sqrt((f2^2 - (f0*4)^2)^2 + ((f0*4) * b2)^2))
+						h4c = h4 - c1_h4 - c2_h4
+
+						# Metrics
+						h1h2_r = h1 - h2
+						h2h4_r = h2 - h4
+						h1a1_r = h1 - a1
+						h1a2_r = h1 - a2
+						h1a3_r = h1 - a3
+						h1h2_c = h1c - h2c
+						h2h4_c = h2c - h4c
+						h1a1_c = h1c - a1
+						h1a2_c = h1c - a2
+						h1a3_c = h1c - a3
+					else
+						h1h2_r=0; h2h4_r=0; h1a1_r=0; h1a2_r=0; h1a3_r=0;
+						h1h2_c=0; h2h4_c=0; h1a1_c=0; h1a2_c=0; h1a3_c=0;
+					endif
+
+					# Append data points horizontally
+					appendFile: "'resultfile$'", ",", h1h2_r, ",", h2h4_r, ",", h1a1_r, ",", h1a2_r, ",", h1a3_r, 
+					... ",", h1h2_c, ",", h2h4_c, ",", h1a1_c, ",", h1a2_c, ",", h1a3_c
+
+					select all
+					minus Strings list
+					minus 'sound'
+					minus 'sound_16khz'
+					minus 'formant_obj'
+					minus 'pitch_obj'
+					minus 'pitch_interp'
+					minus 'textgrid'
+					Remove
+				endfor
+				# Finally add the newline once the row is complete
+				appendFile: "'resultfile$'", newline$
+			endif
+		endfor
+	endif
+	select all
+	minus Strings list
+	Remove
+	select Strings list
+endfor
