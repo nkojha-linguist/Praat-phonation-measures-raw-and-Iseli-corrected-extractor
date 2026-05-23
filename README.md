@@ -1,1 +1,2 @@
 # Praat-phonation-measures-raw-and-Iseli-corrected-extractor
+This Praat script reads all the Sound-TextGrid pairs (with identical names) present in a given folder of PC and extracts 9-time-point contours of the 5 raw and 5 Iseli-corrected acoustic measures of voice quality (H1-H2, H2-H4, H1-A1, H1-A2, H1-A3, H1*-H2*, H2*-H4*, H1*-A1, H1*-A2, H1*-A3) of all the non-empty segments of the first tier. The extracted acoustic data are exported to CSV files.
